@@ -4,9 +4,10 @@ import Prelude
 
 import Backend.App.Types (AppMonad, AppMonadSession, Session)
 import Backend.Config (Config, parse) as Config
+import Backend.Errors (throwValidationError)
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
-import Control.Monad.Except (runExcept, runExceptT)
+import Control.Monad.Except (runExcept, runExceptT, throwError)
 import Control.Monad.Reader (ask, runReaderT)
 import Crypto (Secret(..), sign, unsign)
 import Data.Argonaut (class DecodeJson, class EncodeJson)
@@ -16,7 +17,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Map (Map, empty)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype)
-import Data.String (Pattern(..), Replacement(..), replace)
+import Data.String (Pattern(..), Replacement(..), replace, split)
 import DataStore (memoryStore)
 import Database.PostgreSQL (withConnection)
 import Effect (Effect)
@@ -30,7 +31,7 @@ import Foreign.Class (class Decode, class Encode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Global.Unsafe (unsafeStringify)
 import HTTPure (Method(..), ResponseM)
-import HTTPure (Request, Response, badRequest, internalServerError, ok, serve') as HTTPure
+import HTTPure (Request, Response, badRequest, internalServerError, notFound, ok, serve') as HTTPure
 import HTTPure.Utils (urlDecode)
 
 main ∷ Effect Unit
@@ -76,18 +77,36 @@ registerAndSendConfirm email = do
     log $ "signedCode: " <> signedCode
     log $ "unsignedsignedCode: " <> show unsignedsignedCode
     pure signedCode
+  -- write to the table of pending confirmations
+  -- send email
   pure $ HTTPure.ok msg
 
 parseBodyToEmail ∷ String → String
 parseBodyToEmail =
   replace (Pattern "email=") (Replacement "") >>> urlDecode
 
+-- checkConfirmation ∷ String → AppMonadSession ResponseM
+-- checkConfirmation signed = do
+--   { secret, session: { id: sessionId } } ← ask
+--   code ← liftEffect $ runExceptT $ unsign secret signed
+--   case split (Pattern ".") code of
+--     [ email, id ] | id == sessionId → 
+--     _ → throwValidationError ""
+--   pure HTTPure.notFound
+
 router ∷ HTTPure.Request → AppMonad ResponseM
 router = cookiesSessionMiddleware $ \req@{ method, path, headers, body } → do
   case method, uncons path of
-    Post, Just { head: "register", tail } → do
+    Post, Just { head: "register" } → do
       liftEffect $ log body
       registerAndSendConfirm (parseBodyToEmail body)
+    Get, Just { head: "confirm", tail } → do
+      case uncons tail of
+        Nothing → pure HTTPure.notFound
+        Just { head: signedCode } → do
+          liftEffect $ log signedCode
+          -- checkConfirmation signedCode
+          pure $ HTTPure.internalServerError "notimplemeneted"
     _, _ →
       pure $ serveFile "register.html"
 

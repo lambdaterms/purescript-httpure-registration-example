@@ -1,0 +1,28 @@
+{
+  "name": "purescript-httpure-registration-example",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lambdaterms/purescript-httpure-registration-example.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lambdaterms/purescript-httpure-registration-example/issues"
+  },
+  "homepage": "https://github.com/lambdaterms/purescript-httpure-registration-example#readme",
+  "dependencies": {
+    "decimal.js": "^10.2.0",
+    "pg": "^7.11.0",
+    "uuid": "^3.3.2",
+    "uuid-validate": "0.0.3"
+  }
+}

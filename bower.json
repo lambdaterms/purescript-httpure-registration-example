@@ -12,7 +12,11 @@
     "purescript-effect": "^2.0.1",
     "purescript-selda": "kamirus/purescript-selda#experimental",
     "purescript-httpure": "^0.8.2",
-    "purescript-nodemailer": "^2.0.0"
+    "purescript-nodemailer": "^2.0.0",
+    "purescript-crypto": "^2.0.0",
+    "purescript-argonaut": "^6.0.0",
+    "purescript-errors": "^4.1.0",
+    "purescript-uuid": "^5.2.2"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"

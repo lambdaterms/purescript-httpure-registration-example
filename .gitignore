@@ -7,3 +7,6 @@
 /.psc*
 /.purs*
 /.psa*
+
+backend.json
+package-lock.json

@@ -6,9 +6,6 @@ import Backend.App.Types (AppMonad, AppMonadSession, Session)
 import Backend.Config (Config, parse) as Config
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
-import Backend.Views as Views
-import Backend.Views.Api as Views.Api
-import Backend.Views.Web as Views.Web
 import Control.Monad.Except (runExcept, runExceptT)
 import Control.Monad.Reader (ask, runReaderT)
 import Crypto (Secret(..), sign, unsign)
@@ -34,6 +31,7 @@ import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode
 import Global.Unsafe (unsafeStringify)
 import HTTPure (Method(..), ResponseM)
 import HTTPure (Request, Response, badRequest, internalServerError, ok, serve') as HTTPure
+import HTTPure.Utils (urlDecode)
 
 main ∷ Effect Unit
 main = launchAff_ $ do
@@ -82,19 +80,14 @@ registerAndSendConfirm email = do
 
 parseBodyToEmail ∷ String → String
 parseBodyToEmail =
-  replace (Pattern "email=") (Replacement "")
-  >>> replace (Pattern "%40") (Replacement "@")
-
-registerHandler ∷ String → AppMonadSession ResponseM
-registerHandler rawForm = do
-  registerAndSendConfirm (parseBodyToEmail rawForm)
+  replace (Pattern "email=") (Replacement "") >>> urlDecode
 
 router ∷ HTTPure.Request → AppMonad ResponseM
 router = cookiesSessionMiddleware $ \req@{ method, path, headers, body } → do
   case method, uncons path of
     Post, Just { head: "register", tail } → do
       liftEffect $ log body
-      registerHandler body
+      registerAndSendConfirm (parseBodyToEmail body)
     _, _ →
       pure $ serveFile "register.html"
 

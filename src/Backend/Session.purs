@@ -1,55 +1,27 @@
-module Backend.Session where
+module Backend.Session
+  ( cookiesSessionMiddleware
+  ) where
 
 import Prelude
 
-import Backend.App.Types (AppMonad, AppMonadSession, Session, Cookies)
+import Backend.App.Types (AppMonad, AppMonadSession, Session)
 import Control.Error.Util (hushT)
-import Control.Monad.Except (ExceptT(..), mapExceptT)
+import Control.Monad.Except (mapExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
-import Control.Monad.Reader (ReaderT(..), ask, withReaderT)
+import Control.Monad.Reader (ask, withReaderT)
 import Cookies (Name, Value, Values, CookieAttributes, defaultCookieAttributes, parseCookies, setCookieHeaderValue)
 import Crypto (Secret, sign, unsign)
 import Data.Either (hush)
 import Data.Maybe (Maybe(..))
 import Data.NonEmpty as NonEmpty
-import DataStore (Store, MemoryStore)
+import DataStore (MemoryStore)
 import Effect (Effect)
-import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Foreign.Object (Object)
 import Foreign.Object as Object
 import HTTPure (Headers, Request, ResponseM, header, (!@))
 import HTTPure.Headers as Headers
 import Record (merge)
-
-setCookieHeaderSignedValue ∷ Name → Value → CookieAttributes → Secret → Effect String
-setCookieHeaderSignedValue k v attrs s = do
-  signed ← sign s v
-  pure $ setCookieHeaderValue k signed attrs
-
-sessionIdKey ∷ String
-sessionIdKey = "sessionId"
-
-toCookies ∷ Secret → Maybe (Object Values) → Effect (Maybe Cookies)
-toCookies s obj = runMaybeT do
-  signed ← MaybeT $ pure $ obj >>= Object.lookup sessionIdKey <#> NonEmpty.head
-  sessionId ← hushT $ unsign s signed
-  pure { sessionId }
-
-getSession ∷ Headers → AppMonad (Maybe Session)
-getSession headers = do
-  { store, secret } ← ask
-  liftEffect $ headers !@ "cookie" # parseCookies # hush # toCookies secret
-    >>= case _ of
-      Nothing → pure Nothing
-      Just c → liftEffect $ store.get c.sessionId
-
-createSession ∷ MemoryStore Session → Effect Session
-createSession store = do
-  id ← store.create
-  let session = { id }
-  store.set id session
-  pure session
 
 cookiesSessionMiddleware
   ∷ (Request → AppMonadSession ResponseM)
@@ -71,3 +43,31 @@ cookiesSessionMiddleware router req@{ headers } = do
     , resHeaders
     }) $ router req
 
+getSession ∷ Headers → AppMonad (Maybe Session)
+getSession headers = do
+  { store, secret } ← ask
+  liftEffect $ headers !@ "cookie" # parseCookies # hush # toCookies secret
+    >>= case _ of
+      Nothing → pure Nothing
+      Just c → liftEffect $ store.get c.sessionId
+
+toCookies ∷ Secret → Maybe (Object Values) → Effect (Maybe { sessionId ∷ String })
+toCookies s obj = runMaybeT do
+  signed ← MaybeT $ pure $ obj >>= Object.lookup sessionIdKey <#> NonEmpty.head
+  sessionId ← hushT $ unsign s signed
+  pure { sessionId }
+
+sessionIdKey ∷ String
+sessionIdKey = "sessionId"
+
+createSession ∷ MemoryStore Session → Effect Session
+createSession store = do
+  id ← store.create
+  let session = { id }
+  store.set id session
+  pure session
+
+setCookieHeaderSignedValue ∷ Name → Value → CookieAttributes → Secret → Effect String
+setCookieHeaderSignedValue k v attrs s = do
+  signed ← sign s v
+  pure $ setCookieHeaderValue k signed attrs

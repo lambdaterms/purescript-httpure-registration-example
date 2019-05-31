@@ -2,47 +2,40 @@ module Backend.Errors where
 
 import Prelude
 
-import Control.Monad.Error.Class (class MonadError, throwError)
+import Control.Monad.Error.Class (class MonadError, class MonadThrow, throwError)
 import Data.Variant (Variant, inj)
 import Database.PostgreSQL as PostgreSQL
-import Type.Prelude (SProxy(..))
-import Type.Row (type (+))
+import Prim.Row as R
+import Type.Prelude (class IsSymbol, SProxy(..))
 
 class MonadError (Variant e) m <= MonadErrorV (e ∷ # Type) (m ∷ Type → Type)
 
 instance monadErrorV ∷ MonadError (Variant e) m ⇒ MonadErrorV e m
 
-type Validation e = (validation ∷ String | e)
-type Session e = (session ∷ String | e)
-
-type NotFound e = (notFound ∷ String | e)
-
-type Error = Variant (Validation + Session + NotFound + PGError + Registration + ())
-
 _validation = SProxy ∷ SProxy "validation"
-
-validationError ∷ ∀ e. String → (Variant (Validation + e))
-validationError = inj _validation
-
-throwValidationError ∷ ∀ a e m. MonadError (Variant (Validation + e)) m ⇒ String → m a
-throwValidationError = throwError <<< validationError
 
 _notFound = SProxy ∷ SProxy "notFound"
 
-throwNotFoundError ∷ ∀ a e m. MonadError (Variant (NotFound + e)) m ⇒ String → m a
-throwNotFoundError = throwError <<< inj _notFound
-
 _session = SProxy ∷ SProxy "session"
 
-session ∷ String → Error
-session = inj _session
+_registration = SProxy ∷ SProxy "registration"
+
+throwV ∷ 
+  ∀ e' err sym m a e
+  . MonadThrow (Variant e) m
+  ⇒ R.Cons sym err e' e
+  ⇒ IsSymbol sym
+  ⇒ SProxy sym
+  → err
+  → m a
+throwV sym = throwError <<< inj sym
 
 type PGError e = ( pgError ∷ PostgreSQL.PGError | e )
 
 type Registration e = (registration ∷ String | e)
 
-_registration = SProxy ∷ SProxy "registration"
+type Validation e = (validation ∷ String | e)
 
-throwRegistrationError ∷ ∀ a e m. MonadError (Variant (Registration + e)) m ⇒ String → m a
-throwRegistrationError = throwError <<< inj _registration
+type Session e = (session ∷ String | e)
 
+type NotFound e = (notFound ∷ String | e)

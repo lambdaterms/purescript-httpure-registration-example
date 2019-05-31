@@ -2,25 +2,24 @@ module Backend.RegisterUser where
 
 import Prelude
 
-import Backend.App.Types (User, users)
-import Backend.Errors (throwRegistrationError, throwValidationError)
+import Backend.App.Types (RSecret, User, RSession, users)
+import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
-import Backend.ReaderContexts as R
 import Control.Monad.Except (class MonadError, runExceptT)
 import Control.Monad.Reader (class MonadAsk, class MonadReader, ask)
 import Crypto (hash, randomSalt, sign, unsign)
 import Data.Array (head)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String (Pattern(..), joinWith, split)
 import Data.Variant (SProxy(..), Variant, inj)
 import Database.PostgreSQL (Connection)
 import Database.PostgreSQL as PG
 import Effect (Effect)
-import Effect.Aff.Class (class MonadAff)
-import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Aff.Class (class MonadAff, liftAff)
+import Effect.Class (liftEffect)
 import Effect.Console (log)
-import HTTPure (ResponseM)
+import HTTPure (Response)
 import HTTPure as HTTPure
 import Selda ((.==))
 import Selda as Selda
@@ -43,10 +42,10 @@ type Password = String
 
 sendRegisterConfirmation ∷ 
   ∀ m r
-  . MonadAsk { | R.Secret + R.Session r } m
-  ⇒ MonadEffect m
+  . MonadAsk { | RSecret + RSession r } m
+  ⇒ MonadAff m
   ⇒ String
-  → m ResponseM
+  → m Response
 sendRegisterConfirmation email = do
   { secret, session: { id: sessionId } } ← ask
   let code = email <> ";" <> sessionId
@@ -59,28 +58,22 @@ sendRegisterConfirmation email = do
     log $ "unsignedsignedCode: " <> show unsignedsignedCode
     pure signedCode
   -- send email
-  pure $ HTTPure.ok msg
+  liftAff $ HTTPure.ok msg
 
-handleConfirmation ∷ 
+decodeConfirmationLink ∷ 
   ∀ m e r
-  . MonadSelda m (E.Registration + E.Validation e) (R.Secret r)
+  . MonadSelda m (E.Registration e) (RSecret r)
   ⇒ String
-  → m ResponseM
-handleConfirmation signed = do
+  → m { email ∷ Email, sessionId ∷ String }
+decodeConfirmationLink signed = do
   { secret } ← ask
   code ← liftEffect $ runExceptT $ unsign secret signed
   case split (Pattern ";") <$> code of
     Right [ email, sessionId ] → do
       liftEffect $ log $
-        "register: " <> email <> " for sessionId: " <> sessionId
-      let password = "pass123"
-      registerUser email password >>= case _ of
-        Just user → do
-          liftEffect $ log $ "registered: " <> (joinWith ", " 
-            [show user.id, user.email, user.hashedPassword, user.salt])
-          pure $ HTTPure.ok "registered"
-        Nothing → throwRegistrationError "could not insert to the db"
-    _ → throwValidationError ""
+        "confirm for: " <> email <> "; sessionId: " <> sessionId
+      pure { email, sessionId }
+    _ → throwV _registration "wrong confirmation link"
 
 nextId ∷ Selda.PG.MonadSelda Int
 nextId = do
@@ -103,7 +96,7 @@ guardEmailUnique email = do
     Selda.restrict $ user.email .== Selda.lit email
     pure user
   case head taken of
-    Just user → throwRegistrationError "email already taken"
+    Just user → throwV _registration "email already taken"
     Nothing → pure unit
 
 registerUser ∷
@@ -111,14 +104,16 @@ registerUser ∷
   . MonadSelda m (E.Registration e) r
   ⇒ Email
   → Password
-  → m (Maybe User)
+  → m User
 registerUser email password = do
   guardEmailUnique email
   salt ← liftEffect $ randomSalt
   hashedPassword ← liftEffect $ hashPassword password salt
   id ← hoistSelda nextId
-  hoistSelda $ head <$> Selda.insert users [ { id, email, salt, hashedPassword } ]
-
+  l ← hoistSelda $ Selda.insert users [ { id, email, salt, hashedPassword } ]
+  case head l of
+    Just user → pure user
+    Nothing → throwV _registration "could not insert to the db"
 
 -- future selda
 

@@ -4,11 +4,11 @@ module Backend.Session
 
 import Prelude
 
-import Backend.App.Types (AppMonad, AppMonadSession, Session)
+import Backend.App.Types (AppMonad_, RConn, RCookies, RSecret, RSession, RStore, Session, RResHeaders)
 import Control.Error.Util (hushT)
 import Control.Monad.Except (mapExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
-import Control.Monad.Reader (ask, withReaderT)
+import Control.Monad.Reader (class MonadAsk, ask, withReaderT)
 import Cookies (Name, Value, Values, CookieAttributes, defaultCookieAttributes, parseCookies, setCookieHeaderValue)
 import Crypto (Secret, sign, unsign)
 import Data.Either (hush)
@@ -16,16 +16,21 @@ import Data.Maybe (Maybe(..))
 import Data.NonEmpty as NonEmpty
 import DataStore (MemoryStore)
 import Effect (Effect)
-import Effect.Class (liftEffect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Foreign.Object (Object)
 import Foreign.Object as Object
-import HTTPure (Headers, Request, ResponseM, header, (!@))
+import HTTPure (Headers, Request, header, (!@))
 import HTTPure.Headers as Headers
-import Record (merge)
+import Record as Record
+import Type.Row (type (+))
+
+type BaseAppR r = RSecret + RStore + RConn r
+type SessionAppR r = RCookies + RSession + RResHeaders + BaseAppR r
 
 cookiesSessionMiddleware
-  ∷ (Request → AppMonadSession ResponseM)
-  → (Request → AppMonad ResponseM)
+  ∷ ∀ e a
+  . (Request → AppMonad_ e (SessionAppR ()) a)
+  → (Request → AppMonad_ e (BaseAppR ()) a)
 cookiesSessionMiddleware router req@{ headers } = do
   -- get session, in case of failure (no valid cookie or sessionId expired) create and Set-Cookie
   { session, resHeaders } ← getSession headers >>= case _ of
@@ -36,14 +41,18 @@ cookiesSessionMiddleware router req@{ headers } = do
       session ← liftEffect $ createSession store 
       hv ← liftEffect $ setCookieHeaderSignedValue sessionIdKey session.id defaultCookieAttributes secret
       pure { session, resHeaders: header "Set-Cookie" hv }
-
-  mapExceptT (withReaderT \ctx → merge ctx
+  mapExceptT (withReaderT \ctx → Record.disjointUnion ctx
     { session
     , cookies: { sessionId: session.id } 
     , resHeaders
     }) $ router req
 
-getSession ∷ Headers → AppMonad (Maybe Session)
+getSession
+  ∷ ∀ m r
+  . MonadAsk { | RStore + RSecret r } m
+  ⇒ MonadEffect m
+  ⇒ Headers
+  → m (Maybe Session)
 getSession headers = do
   { store, secret } ← ask
   liftEffect $ headers !@ "cookie" # parseCookies # hush # toCookies secret

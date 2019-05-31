@@ -66,6 +66,7 @@ confirmRoute method body signedCode = do
       serveFile "register-password.html"
     Post → do
       let password = fromBody "password" body
+      log $ "password: " <> password
       -- TODO: check password, does body contain it?
       user ← registerUser email password
       log $ "registered: " <> (joinWith ", " 

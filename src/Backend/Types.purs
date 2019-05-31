@@ -1,13 +1,16 @@
 module Backend.App.Types where
 
-import Backend.Errors (Error)
+import Prelude
+
+import Backend.Errors (class MonadErrorV, Error)
 import Control.Monad.Except (ExceptT, runExceptT)
-import Control.Monad.Reader.Trans (ReaderT, runReaderT)
+import Control.Monad.Reader.Trans (class MonadReader, ReaderT, runReaderT)
 import Crypto (Secret(..))
 import Data.Either (Either)
 import DataStore (MemoryStore)
 import Database.PostgreSQL (Connection) as PostgreSQL
 import Effect.Aff (Aff)
+import Effect.Aff.Class (class MonadAff)
 import HTTPure (Headers)
 import HTTPure (Request) as HTTPure
 import Selda as Selda

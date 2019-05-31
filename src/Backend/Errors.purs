@@ -2,9 +2,9 @@ module Backend.Errors where
 
 import Prelude
 
-import Backend.DB.Error as DB.Error
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Data.Variant (Variant, inj)
+import Database.PostgreSQL as PostgreSQL
 import Type.Prelude (SProxy(..))
 import Type.Row (type (+))
 
@@ -17,7 +17,7 @@ type Session e = (session ∷ String | e)
 
 type NotFound e = (notFound ∷ String | e)
 
-type Error = Variant (Validation + Session + NotFound + DB.Error.Error + Registration + ())
+type Error = Variant (Validation + Session + NotFound + PGError + Registration + ())
 
 _validation = SProxy ∷ SProxy "validation"
 
@@ -37,6 +37,7 @@ _session = SProxy ∷ SProxy "session"
 session ∷ String → Error
 session = inj _session
 
+type PGError e = ( pgError ∷ PostgreSQL.PGError | e )
 
 type Registration e = (registration ∷ String | e)
 

@@ -2,29 +2,29 @@ module Backend.RegisterUser where
 
 import Prelude
 
-import Backend.App.Types (AppMonadSession, users, User)
-import Backend.DB.Error as DBError
-import Backend.Errors (class MonadErrorV, Error, throwRegistrationError, throwValidationError)
-import Backend.Errors as Errors
+import Backend.App.Types (User, users)
+import Backend.Errors (throwRegistrationError, throwValidationError)
+import Backend.Errors as E
+import Backend.ReaderContexts as R
 import Control.Monad.Except (class MonadError, runExceptT)
 import Control.Monad.Reader (class MonadAsk, class MonadReader, ask)
-import Crypto (Secret(..), hash, randomSalt, sign, unsign)
+import Crypto (hash, randomSalt, sign, unsign)
 import Data.Array (head)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), joinWith, split)
-import Data.Variant (SProxy(..), Variant)
-import Database.PostgreSQL (Connection, PGError)
+import Data.Variant (SProxy(..), Variant, inj)
+import Database.PostgreSQL (Connection)
+import Database.PostgreSQL as PG
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import HTTPure (ResponseM)
 import HTTPure as HTTPure
-import HTTPure.Utils (urlDecode)
 import Selda ((.==))
 import Selda as Selda
-import Selda.PG (MonadSelda)
+import Selda.PG as Selda.PG
 import Type.Row (type (+))
 
 type Email = String
@@ -42,9 +42,8 @@ type Password = String
 --   encode = genericEncode $ defaultOptions { unwrapSingleConstructors = true }
 
 sendRegisterConfirmation ∷ 
-  ∀ sctx m r
-  . Bind m
-  ⇒ MonadAsk { secret ∷ Secret, session ∷ { id ∷ String | sctx } | r } m
+  ∀ m r
+  . MonadAsk { | R.Secret + R.Session r } m
   ⇒ MonadEffect m
   ⇒ String
   → m ResponseM
@@ -62,7 +61,11 @@ sendRegisterConfirmation email = do
   -- send email
   pure $ HTTPure.ok msg
 
--- handleConfirmation ∷ String → AppMonadSession ResponseM
+handleConfirmation ∷ 
+  ∀ m e r
+  . MonadSelda m (E.Registration + E.Validation e) (R.Secret r)
+  ⇒ String
+  → m ResponseM
 handleConfirmation signed = do
   { secret } ← ask
   code ← liftEffect $ runExceptT $ unsign secret signed
@@ -79,7 +82,7 @@ handleConfirmation signed = do
         Nothing → throwRegistrationError "could not insert to the db"
     _ → throwValidationError ""
 
-nextId ∷ MonadSelda Int
+nextId ∷ Selda.PG.MonadSelda Int
 nextId = do
   (ids ∷ Array { maxId ∷ Int }) ← Selda.query $ Selda.aggregate $
     Selda.selectFrom users \user → pure { maxId: Selda.max_ user.id }
@@ -92,10 +95,7 @@ hashPassword password salt = hash $ password <> salt
 
 guardEmailUnique ∷
   ∀ m e r
-  . Bind m 
-  ⇒ MonadAff m 
-  ⇒ MonadErrorV (DBError.Error + Errors.Registration e ) m 
-  ⇒ MonadReader { conn ∷ Connection | r } m
+  . MonadSelda m (E.Registration e) r
   ⇒ String
   → m Unit
 guardEmailUnique email = do
@@ -106,7 +106,12 @@ guardEmailUnique email = do
     Just user → throwRegistrationError "email already taken"
     Nothing → pure unit
 
--- registerUser ∷ Email → Password → MonadSelda (Maybe User)
+registerUser ∷
+  ∀ m e r
+  . MonadSelda m (E.Registration e) r
+  ⇒ Email
+  → Password
+  → m (Maybe User)
 registerUser email password = do
   guardEmailUnique email
   salt ← liftEffect $ randomSalt
@@ -114,13 +119,35 @@ registerUser email password = do
   id ← hoistSelda nextId
   hoistSelda $ head <$> Selda.insert users [ { id, email, salt, hashedPassword } ]
 
+
+-- future selda
+
+class 
+  ( MonadAff m
+  , MonadError (Variant ( pgError ∷ PG.PGError | e ) ) m
+  , MonadReader { conn ∷ PG.Connection | r } m
+  ) <= MonadSelda m e r
+
+instance monadSeldaInstance
+  ∷ ( MonadAff m
+    , MonadError (Variant ( pgError ∷ PG.PGError | e ) ) m
+    , MonadReader { conn ∷ PG.Connection | r } m
+    )
+  ⇒ MonadSelda m e r
+
+-- hoistSelda ∷
+--   ∀ m e r
+--   . MonadAff m
+--   ⇒ MonadError (Variant ( DBError.Error e ) ) m
+--   ⇒ MonadReader { conn ∷ Connection | r } m
+--   ⇒ Selda.PG.MonadSelda ~> m
 hoistSelda ∷
   ∀ m e r
-  . MonadAff m
-  ⇒ MonadError (Variant ( DBError.Error e ) ) m
-  ⇒ MonadReader { conn ∷ Connection | r } m
-  ⇒ MonadSelda ~> m
-hoistSelda = Selda.hoistSeldaWith DBError.db fr
+  . MonadSelda m e r
+  ⇒ Selda.PG.MonadSelda ~> m
+hoistSelda = Selda.hoistSeldaWith fe fr
   where
+    fe ∷ PG.PGError → Variant ( pgError ∷ PG.PGError | e )
+    fe = inj (SProxy ∷ SProxy "pgError")
     fr ∷ { conn ∷ Connection | r } → Connection
     fr { conn } = conn

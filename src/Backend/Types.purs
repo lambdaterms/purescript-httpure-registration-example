@@ -10,6 +10,7 @@ import Database.PostgreSQL (Connection) as PostgreSQL
 import Effect.Aff (Aff)
 import HTTPure (Headers)
 import HTTPure (Request) as HTTPure
+import Selda as Selda
 
 type Session = { id ∷ String }
 
@@ -38,12 +39,29 @@ type AppMonad_ err (ctx ∷ # Type) = ExceptT err (ReaderT { | ctx } Aff)
 type AppMonad = AppMonad_ Error
   ( secret ∷ Secret
   , store ∷ Store
+  , conn ∷ PostgreSQL.Connection
   )
 
 type AppMonadSession = AppMonad_ Error
   ( secret ∷ Secret
   , store ∷ Store
+  , conn ∷ PostgreSQL.Connection
   , cookies ∷ Cookies
   , session ∷ Session
   , resHeaders ∷ Headers
   )
+
+
+-- DB Tables
+
+type UserRow = 
+  ( id ∷ Int
+  , email ∷ String
+  , salt ∷ String
+  , hashedPassword ∷ String
+  )
+
+type User = Record UserRow
+
+users ∷ Selda.Table UserRow
+users = Selda.Table { name: "users" }

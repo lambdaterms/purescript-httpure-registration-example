@@ -10,9 +10,11 @@ import Data.String (Pattern(..), Replacement(..), lastIndexOf, replaceAll, split
 import Effect (Effect)
 import Effect.Class (liftEffect)
 import Node.Buffer (Buffer, fromString, toString)
-import Node.Crypto.Hash (Algorithm(SHA512))
+import Node.Crypto (randomBytes)
+import Node.Crypto.Hash (Algorithm(SHA512), createHash)
+import Node.Crypto.Hash as Hash
 import Node.Crypto.Hmac (createHmac, digest, update)
-import Node.Encoding (Encoding(Base64, UTF8))
+import Node.Encoding (Encoding(..))
 
 newtype Secret = Secret String
 derive instance newtypeSecret ∷ Newtype Secret _
@@ -49,6 +51,17 @@ hmac secret plain = do
     =<< digest
     =<< flip update buf
     =<< createHmac SHA512 (unwrap secret)
+
+hash ∷ String → Effect String
+hash plain = do
+  buf <- fromString plain UTF8
+  urisafeBase64.encode
+    =<< Hash.digest
+    =<< flip Hash.update buf
+    =<< createHash SHA512
+
+randomSalt ∷ Effect String
+randomSalt = randomBytes 8 >>= toString Hex
 
 separator ∷ String
 separator = "."

@@ -4,34 +4,27 @@ import Prelude
 
 import Backend.App.Types (AppMonad, AppMonadSession, Session)
 import Backend.Config (Config, parse) as Config
-import Backend.Errors (throwValidationError)
+import Backend.RegisterUser (Email, handleConfirmation, sendRegisterConfirmation)
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
 import Control.Monad.Except (runExcept, runExceptT, throwError)
-import Control.Monad.Reader (ask, runReaderT)
-import Crypto (Secret(..), sign, unsign)
-import Data.Argonaut (class DecodeJson, class EncodeJson)
-import Data.Array (uncons)
+import Control.Monad.Reader (runReaderT)
+import Crypto (Secret(..))
+import Data.Array (head, uncons)
 import Data.Either (Either(..))
-import Data.Generic.Rep (class Generic)
 import Data.Map (Map, empty)
 import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype)
-import Data.String (Pattern(..), Replacement(..), replace, split)
+import Data.String (Pattern(..), Replacement(..), replace)
 import DataStore (memoryStore)
 import Database.PostgreSQL (withConnection)
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
-import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import Effect.Console (logShow)
 import Effect.Ref (new)
-import Foreign.Class (class Decode, class Encode)
-import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Global.Unsafe (unsafeStringify)
 import HTTPure (Method(..), ResponseM)
-import HTTPure (Request, Response, badRequest, internalServerError, notFound, ok, serve') as HTTPure
+import HTTPure as HTTPure
 import HTTPure.Utils (urlDecode)
 
 main ∷ Effect Unit
@@ -50,65 +43,25 @@ main = launchAff_ $ do
       log ("CONFIG PARSE ERROR: " <> unsafeStringify errs)
       pure unit
 
-
-type Email = String
-
--- newtype RegisterForm = RegisterForm { email ∷ Email }
-
--- derive instance newtypeRegisterForm ∷ Newtype RegisterForm _
--- derive instance genericRegisterForm ∷ Generic RegisterForm _
-
--- instance decodeRegisterForm ∷ Decode RegisterForm where
---   decode = genericDecode $ defaultOptions { unwrapSingleConstructors = true }
-
--- instance encodeRegisterForm ∷ Encode RegisterForm where
---   encode = genericEncode $ defaultOptions { unwrapSingleConstructors = true }
-
-
-registerAndSendConfirm ∷ Email → AppMonadSession ResponseM
-registerAndSendConfirm email = do
-  { secret, session: { id: sessionId } } ← ask
-  let code = email <> "." <> sessionId
-  msg ← liftEffect do
-    signedCode ← sign secret code
-    unsignedsignedCode ← runExceptT $ unsign secret signedCode
-    log $ "send email to: " <> email
-    log $ "code: " <> code
-    log $ "signedCode: " <> signedCode
-    log $ "unsignedsignedCode: " <> show unsignedsignedCode
-    pure signedCode
-  -- write to the table of pending confirmations
-  -- send email
-  pure $ HTTPure.ok msg
-
-parseBodyToEmail ∷ String → String
-parseBodyToEmail =
-  replace (Pattern "email=") (Replacement "") >>> urlDecode
-
--- checkConfirmation ∷ String → AppMonadSession ResponseM
--- checkConfirmation signed = do
---   { secret, session: { id: sessionId } } ← ask
---   code ← liftEffect $ runExceptT $ unsign secret signed
---   case split (Pattern ".") code of
---     [ email, id ] | id == sessionId → 
---     _ → throwValidationError ""
---   pure HTTPure.notFound
-
 router ∷ HTTPure.Request → AppMonad ResponseM
 router = cookiesSessionMiddleware $ \req@{ method, path, headers, body } → do
   case method, uncons path of
     Post, Just { head: "register" } → do
       liftEffect $ log body
-      registerAndSendConfirm (parseBodyToEmail body)
+      sendRegisterConfirmation (parseBodyToEmail body)
     Get, Just { head: "confirm", tail } → do
-      case uncons tail of
+      case head tail of
         Nothing → pure HTTPure.notFound
-        Just { head: signedCode } → do
+        Just signedCode → do
           liftEffect $ log signedCode
-          -- checkConfirmation signedCode
-          pure $ HTTPure.internalServerError "notimplemeneted"
+          handleConfirmation signedCode
+          -- pure $ HTTPure.internalServerError "notimplemeneted"
     _, _ →
       pure $ serveFile "register.html"
+  where
+    parseBodyToEmail ∷ String → Email
+    parseBodyToEmail =
+      replace (Pattern "email=") (Replacement "") >>> urlDecode
 
 app ∷ Config.Config → HTTPure.Request → Aff HTTPure.Response
 app { db: pool, debug, secret } request = do
@@ -118,7 +71,7 @@ app { db: pool, debug, secret } request = do
       -- XXX: Do proper logging
       HTTPure.internalServerError "Pg connection error..."
     Right db → do
-      let ctx = { store: memoryStore ref, secret: Secret secret }
+      let ctx = { store: memoryStore ref, secret: Secret secret, conn: db }
       runReaderT (runExceptT $ router request) ctx >>= case _ of
         Left err → HTTPure.internalServerError $ show err
         Right res → res

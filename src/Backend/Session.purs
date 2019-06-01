@@ -4,7 +4,7 @@ module Backend.Session
 
 import Prelude
 
-import Backend.App.Types (AppMonad_, RConn, RCookies, RSecret, RSession, RStore, Session, RResHeaders)
+import Backend.App.Types (AppMonad_, RConn, RCookies, RResHeaders, RSecret, RSession, RStore, Session)
 import Control.Error.Util (hushT)
 import Control.Monad.Except (mapExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
@@ -21,6 +21,7 @@ import Foreign.Object (Object)
 import Foreign.Object as Object
 import HTTPure (Headers, Request, header, (!@))
 import HTTPure.Headers as Headers
+import Prim.Row as R
 import Record as Record
 import Type.Row (type (+))
 
@@ -28,9 +29,10 @@ type BaseAppR r = RSecret + RStore + RConn r
 type SessionAppR r = RCookies + RSession + RResHeaders + BaseAppR r
 
 cookiesSessionMiddleware
-  ∷ ∀ e a
-  . (Request → AppMonad_ e (SessionAppR ()) a)
-  → (Request → AppMonad_ e (BaseAppR ()) a)
+  ∷ ∀ e a r
+  . R.Nub ( | SessionAppR r ) ( | SessionAppR r )
+  ⇒ (Request → AppMonad_ e (SessionAppR r) a)
+  → (Request → AppMonad_ e (BaseAppR r) a)
 cookiesSessionMiddleware router req@{ headers } = do
   -- get session, in case of failure (no valid cookie or sessionId expired) create and Set-Cookie
   { session, resHeaders } ← getSession headers >>= case _ of
@@ -41,11 +43,11 @@ cookiesSessionMiddleware router req@{ headers } = do
       session ← liftEffect $ createSession store 
       hv ← liftEffect $ setCookieHeaderSignedValue sessionIdKey session.id defaultCookieAttributes secret
       pure { session, resHeaders: header "Set-Cookie" hv }
-  mapExceptT (withReaderT \ctx → Record.disjointUnion ctx
+  mapExceptT (withReaderT \ctx → Record.disjointUnion
     { session
     , cookies: { sessionId: session.id } 
     , resHeaders
-    }) $ router req
+    } ctx) $ router req
 
 getSession
   ∷ ∀ m r

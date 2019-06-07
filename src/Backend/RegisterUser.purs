@@ -5,25 +5,26 @@ import Prelude
 import Backend.App.Types (RSecret, User, RSession, users)
 import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
-import Control.Monad.Except (class MonadError, runExceptT)
-import Control.Monad.Reader (class MonadAsk, class MonadReader, ask)
+import Control.Monad.Except (class MonadError, ExceptT, runExceptT)
+import Control.Monad.Reader (class MonadAsk, class MonadReader, ReaderT, ask)
 import Crypto (hash, randomSalt, sign, unsign)
 import Data.Array (head)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..), fromMaybe)
-import Data.String (Pattern(..), joinWith, split)
+import Data.Maybe (Maybe(..))
+import Data.String (Pattern(..), split)
 import Data.Variant (SProxy(..), Variant, inj)
 import Database.PostgreSQL (Connection)
 import Database.PostgreSQL as PG
 import Effect (Effect)
+import Effect.Aff (Aff)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import HTTPure (Response)
 import HTTPure as HTTPure
-import Selda ((.==))
+import Selda (class MonadSelda, (.==))
 import Selda as Selda
-import Selda.PG as Selda.PG
+import Selda.PG (hoistSeldaWith)
 import Type.Row (type (+))
 
 type Email = String
@@ -62,7 +63,7 @@ sendRegisterConfirmation email = do
 
 decodeConfirmationLink ∷ 
   ∀ m e r
-  . MonadSelda m (E.Registration e) (RSecret r)
+  . AppMonad m (E.Registration e) (RSecret r)
   ⇒ String
   → m { email ∷ Email, sessionId ∷ String }
 decodeConfirmationLink signed = do
@@ -75,10 +76,16 @@ decodeConfirmationLink signed = do
       pure { email, sessionId }
     _ → throwV _registration "wrong confirmation link"
 
-nextId ∷ Selda.PG.MonadSelda Int
+nextId ∷ ∀ m. MonadSelda m ⇒ m Int
 nextId = do
-  (ids ∷ Array { maxId ∷ Int }) ← Selda.query $ Selda.aggregate $
-    Selda.selectFrom users \user → pure { maxId: Selda.max_ user.id }
+  (ids ∷ Array { maxId ∷ Int }) ← Selda.query $ 
+    Selda.selectFrom_ do
+      Selda.aggregate $ Selda.selectFrom users \user → 
+        pure { maxId: Selda.max_ user.id }
+      $ \r → do
+        maxId ← Selda.notNull r.maxId
+        pure { maxId }
+
   pure $ case ids of
     [ { maxId } ] → maxId + 1
     _ → 0
@@ -88,7 +95,7 @@ hashPassword password salt = hash $ password <> salt
 
 guardEmailUnique ∷
   ∀ m e r
-  . MonadSelda m (E.Registration e) r
+  . AppMonad m (E.Registration e) r
   ⇒ String
   → m Unit
 guardEmailUnique email = do
@@ -101,7 +108,7 @@ guardEmailUnique email = do
 
 registerUser ∷
   ∀ m e r
-  . MonadSelda m (E.Registration e) r
+  . AppMonad m (E.Registration e) r
   ⇒ Email
   → Password
   → m User
@@ -121,14 +128,14 @@ class
   ( MonadAff m
   , MonadError (Variant ( pgError ∷ PG.PGError | e ) ) m
   , MonadReader { conn ∷ PG.Connection | r } m
-  ) <= MonadSelda m e r
+  ) <= AppMonad m e r
 
-instance monadSeldaInstance
+instance appMonadInstance
   ∷ ( MonadAff m
     , MonadError (Variant ( pgError ∷ PG.PGError | e ) ) m
     , MonadReader { conn ∷ PG.Connection | r } m
     )
-  ⇒ MonadSelda m e r
+  ⇒ AppMonad m e r
 
 -- hoistSelda ∷
 --   ∀ m e r
@@ -138,9 +145,9 @@ instance monadSeldaInstance
 --   ⇒ Selda.PG.MonadSelda ~> m
 hoistSelda ∷
   ∀ m e r
-  . MonadSelda m e r
-  ⇒ Selda.PG.MonadSelda ~> m
-hoistSelda = Selda.hoistSeldaWith fe fr
+  . AppMonad m e r
+  ⇒ ExceptT PG.PGError (ReaderT PG.Connection Aff) ~> m
+hoistSelda = hoistSeldaWith fe fr
   where
     fe ∷ PG.PGError → Variant ( pgError ∷ PG.PGError | e )
     fe = inj (SProxy ∷ SProxy "pgError")

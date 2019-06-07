@@ -14,11 +14,15 @@
     "purescript-httpure": "^0.8.2",
     "purescript-nodemailer": "^2.0.0",
     "purescript-crypto": "^2.0.0",
-    "purescript-argonaut": "^6.0.0",
     "purescript-errors": "^4.1.0",
     "purescript-uuid": "^5.2.2"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"
+  },
+  "resolutions": {
+    "purescript-foreign-object": "^2.0.2",
+    "purescript-record": "^2.0.1",
+    "purescript-typelevel-prelude": "^3.0.0"
   }
 }

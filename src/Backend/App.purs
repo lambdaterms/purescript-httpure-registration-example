@@ -5,7 +5,7 @@ import Prelude
 import Backend.App.Types (AppMonad_, RConn, RCookies, RSecret, RSession, RStore, Session, RResHeaders)
 import Backend.Config (Config, parse) as Config
 import Backend.Errors as E
-import Backend.RegisterUser (class MonadSelda, Email, decodeConfirmationLink, registerUser, sendRegisterConfirmation)
+import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, registerUser, sendRegisterConfirmation)
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
 import Control.Monad.Except (runExceptT)
@@ -32,10 +32,10 @@ import Type.Row (type (+))
 
 type Error e = E.Validation + E.Session + E.NotFound + E.PGError + E.Registration e
 
-type AppMonad = AppMonad_ ( | Error () )
+type App = AppMonad_ ( | Error () )
   (RSecret + RStore + RConn ())
 
-type AppMonadSession = AppMonad_ ( Error () )
+type AppSession = AppMonad_ ( Error () )
   (RSecret + RStore + RConn + RCookies + RSession + RResHeaders ())
 
 main ∷ Effect Unit
@@ -56,7 +56,7 @@ main = launchAff_ $ do
 
 confirmRoute ∷
   ∀ m e r
-  . MonadSelda m (E.Registration e) (RSecret r)
+  . AppMonad m (E.Registration e) (RSecret r)
   ⇒ Method → String → String → m Response
 confirmRoute method body signedCode = do
   log signedCode
@@ -74,7 +74,7 @@ confirmRoute method body signedCode = do
       liftAff $ HTTPure.ok "registered"
     _ → liftAff HTTPure.notFound
 
-router ∷ HTTPure.Request → AppMonad Response
+router ∷ HTTPure.Request → App Response
 router = cookiesSessionMiddleware $ \req@{ method, path, headers, body } → do
   case method, uncons path of
     Post, Just { head: "register" } → do

@@ -3,7 +3,7 @@ module Backend.App where
 import Prelude
 
 import Backend.App.Types (AppMonad_, RConn, RCookies, RResHeaders, RSecret, RSession, RStore, Session, RMailTransporter)
-import Backend.Config (Config, parse) as Config
+import Backend.Config (Config)
 import Backend.Errors as E
 import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, registerUser, sendRegisterConfirmation)
 import Backend.Session (cookiesSessionMiddleware)
@@ -18,13 +18,11 @@ import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), Replacement(..), joinWith, replace)
 import DataStore (memoryStore)
 import Database.PostgreSQL (withConnection)
-import Effect (Effect)
-import Effect.Aff (Aff, launchAff_)
+import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Ref (new)
-import Global.Unsafe (unsafeStringify)
 import HTTPure (Method(..), Response, Request)
 import HTTPure as HTTPure
 import HTTPure.Utils (urlDecode)
@@ -38,22 +36,6 @@ type App = AppMonad_ ( | Error () )
 
 type AppSession = AppMonad_ ( Error () )
   (RSecret + RStore + RConn + RCookies + RSession + RResHeaders ())
-
-main ∷ Effect Unit
-main = launchAff_ $ do
-  ectx ← Config.parse
-  case ectx of
-    Right ctx → do
-      void $ liftEffect $ HTTPure.serve'
-        { port: ctx.port
-        , hostname: "0.0.0.0"
-        , backlog: Nothing
-        }
-        (app ctx)
-        (log ("Server up localhost:" <> show ctx.port))
-    Left errs → do
-      log ("CONFIG PARSE ERROR: " <> unsafeStringify errs)
-      pure unit
 
 confirmRoute ∷
   ∀ m e r
@@ -97,7 +79,7 @@ fromBody ∷ String → String → Email
 fromBody key =
   replace (Pattern $ key <> "=") (Replacement "") >>> urlDecode
 
-app ∷ Config.Config → Request → Aff Response
+app ∷ Config → Request → Aff Response
 app { db: pool, debug, secret } request = do
   ref ← liftEffect $ new (empty ∷ Map String Session)
   withConnection pool case _ of
@@ -118,13 +100,3 @@ app { db: pool, debug, secret } request = do
       runReaderT (runExceptT $ router request) ctx >>= case _ of
         Left err → HTTPure.internalServerError $ show err
         Right res → pure res
-
-        -- _, Just { head: "api", tail: subpath } →
-        --   Views.Api.router (ctx { request { path = subpath }})
-        -- method, pathParts → Views.Web.runApp ctx $ case method, pathParts of
-        --   Get, Nothing → Views.indexHtml
-        --   Get, Just { head: "bundle.js" } → Views.bundleJs
-        --   Get, Just { head: "static", tail } → Views.static tail
-        --   -- _, Just { head: "test-order", tail } → Store.router $ req { path = tail }
-        --   _, _ → liftAff $ Views.notFound path body headers
-

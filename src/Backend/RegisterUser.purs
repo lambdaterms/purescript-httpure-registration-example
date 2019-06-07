@@ -22,6 +22,8 @@ import Effect.Class (liftEffect)
 import Effect.Console (log)
 import HTTPure (Response)
 import HTTPure as HTTPure
+import NodeMailer (createTransporter)
+import NodeMailer as Mail
 import Selda (class MonadSelda, (.==))
 import Selda as Selda
 import Selda.PG (hoistSeldaWith)
@@ -30,16 +32,22 @@ import Type.Row (type (+))
 type Email = String
 type Password = String
 
--- newtype RegisterForm = RegisterForm { email ∷ Email }
-
--- derive instance newtypeRegisterForm ∷ Newtype RegisterForm _
--- derive instance genericRegisterForm ∷ Generic RegisterForm _
-
--- instance decodeRegisterForm ∷ Decode RegisterForm where
---   decode = genericDecode $ defaultOptions { unwrapSingleConstructors = true }
-
--- instance encodeRegisterForm ∷ Encode RegisterForm where
---   encode = genericEncode $ defaultOptions { unwrapSingleConstructors = true }
+sendConfirmationEmail ∷ String → String → Aff Unit
+sendConfirmationEmail email text = do
+  config ← Mail.createTestAccount
+  transporter ← liftEffect $ createTransporter config
+  msgInfo ← Mail.sendMail_ msg transporter
+  liftEffect $ log $ "Mail at: " <> (show $ Mail.getTestMessageUrl msgInfo)
+    where 
+      msg = 
+        { from: "noreply@example.com"
+        , to: [ email ]
+        , cc: []
+        , bcc: []
+        , subject: "Confirm Registration Email"
+        , text
+        , attachments: []
+        }
 
 sendRegisterConfirmation ∷ 
   ∀ m r
@@ -58,8 +66,10 @@ sendRegisterConfirmation email = do
     log $ "signedCode: " <> signedCode
     log $ "unsignedsignedCode: " <> show unsignedsignedCode
     pure signedCode
-  -- send email
-  liftAff $ HTTPure.ok msg
+  let link = "http://localhost:9000/confirm/" <> msg
+  liftAff do
+    sendConfirmationEmail email link
+    HTTPure.ok msg
 
 decodeConfirmationLink ∷ 
   ∀ m e r

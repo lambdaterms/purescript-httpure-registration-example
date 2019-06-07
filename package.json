@@ -21,6 +21,7 @@
   "homepage": "https://github.com/lambdaterms/purescript-httpure-registration-example#readme",
   "dependencies": {
     "decimal.js": "^10.2.0",
+    "nodemailer": "^6.2.1",
     "pg": "^7.11.0",
     "uuid": "^3.3.2",
     "uuid-validate": "0.0.3"

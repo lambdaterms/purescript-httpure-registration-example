@@ -2,7 +2,7 @@ module Backend.App where
 
 import Prelude
 
-import Backend.App.Types (AppMonad_, RConn, RCookies, RSecret, RSession, RStore, Session, RResHeaders)
+import Backend.App.Types (AppMonad_, RConn, RCookies, RResHeaders, RSecret, RSession, RStore, Session, RMailTransporter)
 import Backend.Config (Config, parse) as Config
 import Backend.Errors as E
 import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, registerUser, sendRegisterConfirmation)
@@ -28,12 +28,13 @@ import Global.Unsafe (unsafeStringify)
 import HTTPure (Method(..), Response, Request)
 import HTTPure as HTTPure
 import HTTPure.Utils (urlDecode)
+import NodeMailer as Mail
 import Type.Row (type (+))
 
 type Error e = E.Validation + E.Session + E.NotFound + E.PGError + E.Registration e
 
 type App = AppMonad_ ( | Error () )
-  (RSecret + RStore + RConn ())
+  (RSecret + RStore + RConn + RMailTransporter ())
 
 type AppSession = AppMonad_ ( Error () )
   (RSecret + RStore + RConn + RCookies + RSession + RResHeaders ())
@@ -104,7 +105,16 @@ app { db: pool, debug, secret } request = do
       -- XXX: Do proper logging
       HTTPure.internalServerError "Pg connection error.."
     Right db → do
-      let ctx = { store: memoryStore ref, secret: Secret secret, conn: db }
+      mailTransporter ← do 
+        config ← Mail.createTestAccount
+        liftEffect $ Mail.createTransporter config
+      let
+        ctx = 
+          { store: memoryStore ref
+          , secret: Secret secret
+          , conn: db
+          , mailTransporter
+          }
       runReaderT (runExceptT $ router request) ctx >>= case _ of
         Left err → HTTPure.internalServerError $ show err
         Right res → pure res

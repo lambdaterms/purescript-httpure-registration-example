@@ -8,6 +8,7 @@ import DataStore (MemoryStore)
 import Database.PostgreSQL (Connection) as PostgreSQL
 import Effect.Aff (Aff)
 import HTTPure as HTTPure
+import NodeMailer as Mail
 import Selda as Selda
 
 type Session = { id ∷ String }
@@ -55,3 +56,5 @@ type RCookies r = ( cookies ∷ Cookies | r )
 type RSession r = ( session ∷ Session | r )
 
 type RResHeaders r = ( resHeaders ∷ HTTPure.Headers | r )
+
+type RMailTransporter r = ( mailTransporter ∷ Mail.Transporter | r )

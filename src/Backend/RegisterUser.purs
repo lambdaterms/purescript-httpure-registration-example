@@ -2,7 +2,7 @@ module Backend.RegisterUser where
 
 import Prelude
 
-import Backend.App.Types (RSecret, User, RSession, users)
+import Backend.App.Types (RSecret, RSession, User, RMailTransporter, users)
 import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
 import Control.Monad.Except (class MonadError, ExceptT, runExceptT)
@@ -22,7 +22,6 @@ import Effect.Class (liftEffect)
 import Effect.Console (log)
 import HTTPure (Response)
 import HTTPure as HTTPure
-import NodeMailer (createTransporter)
 import NodeMailer as Mail
 import Selda (class MonadSelda, (.==))
 import Selda as Selda
@@ -32,26 +31,30 @@ import Type.Row (type (+))
 type Email = String
 type Password = String
 
-sendConfirmationEmail ∷ String → String → Aff Unit
+sendConfirmationEmail ∷
+  ∀ m r
+  . MonadAff m
+  ⇒ MonadAsk { | RMailTransporter r } m
+  ⇒ String → String → m Unit
 sendConfirmationEmail email text = do
-  config ← Mail.createTestAccount
-  transporter ← liftEffect $ createTransporter config
-  msgInfo ← Mail.sendMail_ msg transporter
-  liftEffect $ log $ "Mail at: " <> (show $ Mail.getTestMessageUrl msgInfo)
-    where 
-      msg = 
-        { from: "noreply@example.com"
-        , to: [ email ]
-        , cc: []
-        , bcc: []
-        , subject: "Confirm Registration Email"
-        , text
-        , attachments: []
-        }
+  let 
+    msg = 
+      { from: "noreply@example.com"
+      , to: [ email ]
+      , cc: []
+      , bcc: []
+      , subject: "Confirm Registration Email"
+      , text
+      , attachments: []
+      }
+  { mailTransporter } ← ask
+  liftAff do
+    msgInfo ← Mail.sendMail_ msg mailTransporter
+    liftEffect $ log $ "Mail at: " <> (show $ Mail.getTestMessageUrl msgInfo)
 
 sendRegisterConfirmation ∷ 
   ∀ m r
-  . MonadAsk { | RSecret + RSession r } m
+  . MonadAsk { | RSecret + RSession + RMailTransporter r } m
   ⇒ MonadAff m
   ⇒ String
   → m Response
@@ -67,9 +70,8 @@ sendRegisterConfirmation email = do
     log $ "unsignedsignedCode: " <> show unsignedsignedCode
     pure signedCode
   let link = "http://localhost:9000/confirm/" <> msg
-  liftAff do
-    sendConfirmationEmail email link
-    HTTPure.ok msg
+  sendConfirmationEmail email link
+  liftAff $ HTTPure.ok msg
 
 decodeConfirmationLink ∷ 
   ∀ m e r

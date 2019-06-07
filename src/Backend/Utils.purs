@@ -13,8 +13,6 @@ import Foreign (ForeignError(..), MultipleErrors, renderForeignError)
 import Foreign.Generic (defaultOptions, genericDecodeJSON)
 import Foreign.Generic.Class (class GenericDecode)
 import Foreign.Generic.Types (Options)
-import HTTPure (Headers, Path, ResponseM)
-import HTTPure as H
 
 decode ∷
   ∀ a rep

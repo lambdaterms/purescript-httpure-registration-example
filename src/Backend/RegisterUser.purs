@@ -2,17 +2,20 @@ module Backend.RegisterUser where
 
 import Prelude
 
-import Backend.App.Types (RSecret, RSession, User, RMailTransporter, users)
+import Backend.App.Types (RMailTransporter, RSecret, RSession, User, Session, users)
+import Backend.Effects (MAILER, HMAC)
+import Backend.Effects as Eff
 import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
 import Control.Monad.Except (class MonadError, ExceptT, runExceptT)
 import Control.Monad.Reader (class MonadAsk, class MonadReader, ReaderT, ask)
-import Crypto (hash, randomSalt, sign, unsign)
+import Crypto (Secret(..), hash, randomSalt, sign, unsign)
 import Data.Array (head)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), split)
 import Data.Variant (SProxy(..), Variant, inj)
+import Data.Variant.Internal (FProxy(..))
 import Database.PostgreSQL (Connection)
 import Database.PostgreSQL as PG
 import Effect (Effect)
@@ -23,6 +26,10 @@ import Effect.Console (log)
 import HTTPure (Response)
 import HTTPure as HTTPure
 import NodeMailer as Mail
+import Run (Run(..), EFFECT)
+import Run as Run
+import Run.Reader (READER)
+import Run.Reader as Run.Reader
 import Selda (class MonadSelda, (.==))
 import Selda as Selda
 import Selda.PG (hoistSeldaWith)
@@ -30,6 +37,18 @@ import Type.Row (type (+))
 
 type Email = String
 type Password = String
+
+sendConfirmationEmail' ∷
+  ∀ eff
+  . String → String → Run ( mailer ∷ MAILER, effect ∷ EFFECT | eff ) Unit
+sendConfirmationEmail' email text = do
+  url ← Eff.sendMail
+    { from: "noreply@example.com"
+    , to: email
+    , subject: "Confirm Registration Email"
+    , text
+    }
+  Run.liftEffect $ log $ "Mail at: " <> url
 
 sendConfirmationEmail ∷
   ∀ m r
@@ -51,6 +70,34 @@ sendConfirmationEmail email text = do
   liftAff do
     msgInfo ← Mail.sendMail_ msg mailTransporter
     liftEffect $ log $ "Mail at: " <> (show $ Mail.getTestMessageUrl msgInfo)
+
+sendRegisterConfirmation' ∷ 
+  ∀ r eff
+  . String
+  → Run 
+      ( effect ∷ EFFECT
+      , hmac ∷ HMAC
+      , mailer ∷ MAILER
+      , reader ∷ READER { secret ∷ Secret, session ∷ Session | r }
+      | eff
+      )
+      String
+sendRegisterConfirmation' email = do
+  { secret, session: { id: sessionId } } ← Run.Reader.ask
+  let code = email <> ";" <> sessionId
+  msg ← do
+    signedCode ← Eff.sign secret code
+    unsignedsignedCode ← Eff.unsign secret signedCode
+    Run.liftEffect do 
+      log $ "send email to: " <> email
+      log $ "code: " <> code
+      log $ "signedCode: " <> signedCode
+      log $ "unsignedsignedCode: " <> show unsignedsignedCode
+    pure signedCode
+  let link = "http://localhost:9000/confirm/" <> msg
+  sendConfirmationEmail' email link
+  pure msg
+  -- liftAff $ HTTPure.ok msg
 
 sendRegisterConfirmation ∷ 
   ∀ m r

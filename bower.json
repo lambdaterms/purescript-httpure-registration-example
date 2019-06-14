@@ -15,7 +15,8 @@
     "purescript-nodemailer": "^2.0.0",
     "purescript-crypto": "^2.0.0",
     "purescript-errors": "^4.1.0",
-    "purescript-uuid": "^5.2.2"
+    "purescript-uuid": "^5.2.2",
+    "purescript-run": "^3.0.1"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"

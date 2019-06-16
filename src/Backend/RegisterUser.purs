@@ -9,13 +9,12 @@ import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
 import Control.Monad.Except (class MonadError, ExceptT, runExceptT)
 import Control.Monad.Reader (class MonadAsk, class MonadReader, ReaderT, ask)
-import Crypto (Secret(..), hash, randomSalt, sign, unsign)
+import Crypto (Secret, hash, randomSalt, sign, unsign)
 import Data.Array (head)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), split)
 import Data.Variant (SProxy(..), Variant, inj)
-import Data.Variant.Internal (FProxy(..))
 import Database.PostgreSQL (Connection)
 import Database.PostgreSQL as PG
 import Effect (Effect)
@@ -26,8 +25,10 @@ import Effect.Console (log)
 import HTTPure (Response)
 import HTTPure as HTTPure
 import NodeMailer as Mail
-import Run (Run(..), EFFECT)
+import Run (Run, EFFECT)
 import Run as Run
+import Run.Except (EXCEPT)
+import Run.Except as Run.Except
 import Run.Reader (READER)
 import Run.Reader as Run.Reader
 import Selda (class MonadSelda, (.==))
@@ -78,7 +79,7 @@ sendRegisterConfirmation' ∷
       ( effect ∷ EFFECT
       , hmac ∷ HMAC
       , mailer ∷ MAILER
-      , reader ∷ READER { secret ∷ Secret, session ∷ Session | r }
+      , reader ∷ READER { | RSecret + RSession r }
       | eff
       )
       String
@@ -119,6 +120,26 @@ sendRegisterConfirmation email = do
   let link = "http://localhost:9000/confirm/" <> msg
   sendConfirmationEmail email link
   liftAff $ HTTPure.ok msg
+
+decodeConfirmationLink' ∷ 
+  ∀ e r
+  . String
+  → Run 
+      ( effect ∷ EFFECT
+      , hmac ∷ HMAC
+      , except ∷ EXCEPT (Variant (E.Registration e))
+      , reader ∷ READER { | RSecret r }
+      )
+      { email ∷ Email, sessionId ∷ String }
+decodeConfirmationLink' signed = do
+  { secret } ← Run.Reader.ask
+  code ← Eff.unsign secret signed
+  case split (Pattern ";") <$> code of
+    Right [ email, sessionId ] → do
+      Run.liftEffect $ log $
+        "confirm for: " <> email <> "; sessionId: " <> sessionId
+      pure { email, sessionId }
+    _ → Run.Except.throw $ inj _registration "wrong confirmation link"
 
 decodeConfirmationLink ∷ 
   ∀ m e r

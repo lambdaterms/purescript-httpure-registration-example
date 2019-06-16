@@ -4,8 +4,11 @@ import Prelude
 
 import Backend.App.Types (AppMonad_, RConn, RCookies, RResHeaders, RSecret, RSession, RStore, Session, RMailTransporter)
 import Backend.Config (Config)
+import Backend.Effects (HMAC, HTTP, SELDA, HASH)
+import Backend.Effects as Eff
+import Backend.Errors (_notFound)
 import Backend.Errors as E
-import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, registerUser, sendRegisterConfirmation)
+import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, decodeConfirmationLink', registerUser, registerUser', sendRegisterConfirmation)
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
 import Control.Monad.Except (runExceptT)
@@ -16,6 +19,7 @@ import Data.Either (Either(..))
 import Data.Map (Map, empty)
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), Replacement(..), joinWith, replace)
+import Data.Variant (Variant)
 import DataStore (memoryStore)
 import Database.PostgreSQL (withConnection)
 import Effect.Aff (Aff)
@@ -27,6 +31,11 @@ import HTTPure (Method(..), Response, Request)
 import HTTPure as HTTPure
 import HTTPure.Utils (urlDecode)
 import NodeMailer as Mail
+import Run (Run(..), EFFECT, inj)
+import Run as Run
+import Run.Except (EXCEPT)
+import Run.Except as Run.Except
+import Run.Reader (READER)
 import Type.Row (type (+))
 
 type Error e = E.Validation + E.Session + E.NotFound + E.PGError + E.Registration e
@@ -36,6 +45,38 @@ type App = AppMonad_ ( | Error () )
 
 type AppSession = AppMonad_ ( Error () )
   (RSecret + RStore + RConn + RCookies + RSession + RResHeaders ())
+
+confirmRoute' ∷
+  ∀ eff e r resp
+  . Method
+  → String
+  → String
+  → Run
+      ( effect ∷ EFFECT
+      , hmac ∷ HMAC
+      , except ∷ EXCEPT (Variant (E.Registration e))
+      , reader ∷ READER { | RSecret r }
+      , http ∷ HTTP resp
+      , selda ∷ SELDA
+      , hash ∷ HASH
+      | eff
+      )
+      resp
+confirmRoute' method body signedCode = do
+  Run.liftEffect $ log signedCode
+  { email, sessionId } ← decodeConfirmationLink' signedCode
+  case method of
+    Get → 
+      Eff.serveFile "register-password.html"
+    Post → do
+      let password = fromBody "password" body
+      Run.liftEffect $ log $ "password: " <> password
+      -- TODO: check password, does body contain it?
+      user ← registerUser' email password
+      Run.liftEffect $ log $ "registered: " <> (joinWith ", " 
+        [show user.id, user.email, user.hashedPassword, user.salt])
+      Eff.ok "registered"
+    _ → Eff.notFound
 
 confirmRoute ∷
   ∀ m e r

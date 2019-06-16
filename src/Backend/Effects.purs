@@ -7,6 +7,7 @@ import Crypto (Secret)
 import Data.Either (Either)
 import Data.Symbol (SProxy(..))
 import Data.Variant.Internal (FProxy)
+import HTTPure (Response)
 import Run (Run)
 import Run as Run
 
@@ -89,7 +90,7 @@ maxUserId ∷ ∀ r. Run (selda ∷ SELDA | r) (Array { maxId ∷ Int})
 maxUserId = Run.lift _selda (MaxUserId identity)
 
 
--- Hash Effect
+-- Http Effect
 
 data HashF a
   = HashIt String (String → a)
@@ -106,3 +107,26 @@ hash s = Run.lift _hash (HashIt s identity)
 
 randomSalt ∷ ∀ r. Run (hash ∷ HASH | r) String
 randomSalt = Run.lift _hash (Salt identity)
+
+
+-- HTTP Effect
+
+data HttpF resp a
+  = ServeFile String (resp → a)
+  | Ok String (resp → a)
+  | NotFound (resp → a)
+
+derive instance functorHttpF ∷ Functor (HttpF resp)
+
+type HTTP resp = FProxy (HttpF resp)
+
+_http = SProxy ∷ SProxy "http"
+
+serveFile ∷ ∀ resp r. String → Run (http ∷ HTTP resp | r) resp
+serveFile path = Run.lift _http (ServeFile path identity)
+
+ok ∷ ∀ resp r. String → Run (http ∷ HTTP resp | r) resp
+ok txt = Run.lift _http (Ok txt identity)
+
+notFound ∷ ∀ resp r. Run (http ∷ HTTP resp | r) resp
+notFound = Run.lift _http (NotFound identity)

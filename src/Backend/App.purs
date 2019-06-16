@@ -4,11 +4,11 @@ import Prelude
 
 import Backend.App.Types (AppMonad_, RConn, RCookies, RResHeaders, RSecret, RSession, RStore, Session, RMailTransporter)
 import Backend.Config (Config)
-import Backend.Effects (HMAC, HTTP, SELDA, HASH)
+import Backend.Effects (HASH, HMAC, HTTP, SELDA, MAILER)
 import Backend.Effects as Eff
 import Backend.Errors (_notFound)
 import Backend.Errors as E
-import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, decodeConfirmationLink', registerUser, registerUser', sendRegisterConfirmation)
+import Backend.RegisterUser (class AppMonad, Email, decodeConfirmationLink, decodeConfirmationLink', registerUser, registerUser', sendRegisterConfirmation, sendRegisterConfirmation')
 import Backend.Session (cookiesSessionMiddleware)
 import Backend.Views (serveFile)
 import Control.Monad.Except (runExceptT)
@@ -97,6 +97,37 @@ confirmRoute method body signedCode = do
         [show user.id, user.email, user.hashedPassword, user.salt])
       liftAff $ HTTPure.ok "registered"
     _ → liftAff HTTPure.notFound
+
+router' ∷
+  ∀ eff e r resp
+  . HTTPure.Request
+  → Run
+      ( effect ∷ EFFECT
+      , hmac ∷ HMAC
+      , except ∷ EXCEPT (Variant (E.Registration e))
+      , reader ∷ READER { | RSecret + RSession r }
+      , http ∷ HTTP resp
+      , selda ∷ SELDA
+      , hash ∷ HASH
+      , mailer ∷ MAILER
+      | eff
+      )
+      resp
+router' req@{ method, path, headers, body } = do
+  case method, uncons path of
+    Post, Just { head: "register" } → do
+      Run.liftEffect $ log body
+      sendRegisterConfirmation' (fromBody "email" body)
+    _, Just { head: "confirm", tail } → do
+      -- path: /confirm/signedCode
+      -- GET: show register form
+      -- POST: register user; password should be in body
+      case head tail of
+        Nothing → Eff.notFound
+        Just signedCode → do
+          confirmRoute' method body signedCode
+    _, _ →
+      Eff.serveFile "register.html"
 
 router ∷ HTTPure.Request → App Response
 router = cookiesSessionMiddleware $ \req@{ method, path, headers, body } → do

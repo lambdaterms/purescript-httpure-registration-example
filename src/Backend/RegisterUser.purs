@@ -3,7 +3,7 @@ module Backend.RegisterUser where
 import Prelude
 
 import Backend.App.Types (RMailTransporter, RSecret, RSession, User, Session, users)
-import Backend.Effects (HMAC, MAILER, SELDA, HASH, filterUsersByEmail)
+import Backend.Effects (HASH, HMAC, MAILER, SELDA, HTTP, filterUsersByEmail)
 import Backend.Effects as Eff
 import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
@@ -73,16 +73,17 @@ sendConfirmationEmail email text = do
     liftEffect $ log $ "Mail at: " <> (show $ Mail.getTestMessageUrl msgInfo)
 
 sendRegisterConfirmation' ∷ 
-  ∀ r eff
+  ∀ r eff resp
   . String
   → Run 
       ( effect ∷ EFFECT
       , hmac ∷ HMAC
       , mailer ∷ MAILER
       , reader ∷ READER { | RSecret + RSession r }
+      , http ∷ HTTP resp
       | eff
       )
-      String
+      resp
 sendRegisterConfirmation' email = do
   { secret, session: { id: sessionId } } ← Run.Reader.ask
   let code = email <> ";" <> sessionId
@@ -97,8 +98,7 @@ sendRegisterConfirmation' email = do
     pure signedCode
   let link = "http://localhost:9000/confirm/" <> msg
   sendConfirmationEmail' email link
-  pure msg
-  -- liftAff $ HTTPure.ok msg
+  Eff.ok msg
 
 sendRegisterConfirmation ∷ 
   ∀ m r

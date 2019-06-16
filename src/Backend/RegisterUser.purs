@@ -3,7 +3,7 @@ module Backend.RegisterUser where
 import Prelude
 
 import Backend.App.Types (RMailTransporter, RSecret, RSession, User, Session, users)
-import Backend.Effects (MAILER, HMAC)
+import Backend.Effects (HMAC, MAILER, SELDA, HASH, filterUsersByEmail)
 import Backend.Effects as Eff
 import Backend.Errors (_registration, throwV)
 import Backend.Errors as E
@@ -122,13 +122,14 @@ sendRegisterConfirmation email = do
   liftAff $ HTTPure.ok msg
 
 decodeConfirmationLink' ∷ 
-  ∀ e r
+  ∀ e r eff
   . String
   → Run 
       ( effect ∷ EFFECT
       , hmac ∷ HMAC
       , except ∷ EXCEPT (Variant (E.Registration e))
       , reader ∷ READER { | RSecret r }
+      | eff
       )
       { email ∷ Email, sessionId ∷ String }
 decodeConfirmationLink' signed = do
@@ -156,6 +157,14 @@ decodeConfirmationLink signed = do
       pure { email, sessionId }
     _ → throwV _registration "wrong confirmation link"
 
+nextId' ∷ ∀ eff. Run ( selda ∷ SELDA | eff ) Int
+nextId' = do
+  (ids ∷ Array { maxId ∷ Int }) ← Eff.maxUserId
+
+  pure $ case ids of
+    [ { maxId } ] → maxId + 1
+    _ → 0
+
 nextId ∷ ∀ m. MonadSelda m ⇒ m Int
 nextId = do
   (ids ∷ Array { maxId ∷ Int }) ← Selda.query $ 
@@ -170,8 +179,26 @@ nextId = do
     [ { maxId } ] → maxId + 1
     _ → 0
 
+hashPassword' ∷ ∀ eff. Password → String → Run ( hash ∷ HASH | eff ) String
+hashPassword' password salt = Eff.hash $ password <> salt
+
 hashPassword ∷ Password → String → Effect String
 hashPassword password salt = hash $ password <> salt
+
+guardEmailUnique' ∷
+  ∀ e eff
+  . String
+  → Run 
+      ( selda ∷ SELDA
+      , except ∷ EXCEPT (Variant (E.Registration e))
+      | eff
+      )
+      Unit
+guardEmailUnique' email = do
+  taken ← filterUsersByEmail email
+  case head taken of
+    Just user → Run.Except.throw $ inj _registration "email already taken"
+    Nothing → pure unit
 
 guardEmailUnique ∷
   ∀ m e r
@@ -185,6 +212,27 @@ guardEmailUnique email = do
   case head taken of
     Just user → throwV _registration "email already taken"
     Nothing → pure unit
+
+registerUser' ∷
+  ∀ e eff
+  . Email
+  → Password
+  → Run 
+      ( selda ∷ SELDA
+      , except ∷ EXCEPT (Variant (E.Registration e))
+      , hash ∷ HASH
+      | eff
+      )
+      User
+registerUser' email password = do
+  guardEmailUnique' email
+  salt ← Eff.randomSalt
+  hashedPassword ← hashPassword' password salt
+  id ← nextId'
+  l ← Eff.insertUsers [ { id, email, salt, hashedPassword } ]
+  case head l of
+    Just user → pure user
+    Nothing → Run.Except.throw $ inj _registration "could not insert to the db"
 
 registerUser ∷
   ∀ m e r

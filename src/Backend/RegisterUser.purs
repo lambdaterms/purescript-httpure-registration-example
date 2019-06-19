@@ -160,7 +160,6 @@ decodeConfirmationLink signed = do
 nextId' ∷ ∀ eff. Run ( selda ∷ SELDA | eff ) Int
 nextId' = do
   (ids ∷ Array { maxId ∷ Int }) ← Eff.maxUserId
-
   pure $ case ids of
     [ { maxId } ] → maxId + 1
     _ → 0
@@ -174,7 +173,6 @@ nextId = do
       $ \r → do
         maxId ← Selda.notNull r.maxId
         pure { maxId }
-
   pure $ case ids of
     [ { maxId } ] → maxId + 1
     _ → 0

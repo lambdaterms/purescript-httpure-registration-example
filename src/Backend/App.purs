@@ -76,7 +76,8 @@ confirmRoute' method body signedCode = do
       Run.liftEffect $ log $ "registered: " <> (joinWith ", " 
         [show user.id, user.email, user.hashedPassword, user.salt])
       Eff.ok "registered"
-    _ → Eff.notFound
+    _ →
+      Eff.notFound
 
 confirmRoute ∷
   ∀ m e r
